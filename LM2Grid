@@ -1,0 +1,139 @@
+function LM2Grid(xEst)
+% 栅格地图的生成，及A*算法实现
+% 输入为EKF SLAM中建图得到的87个估计路标位置
+
+% 起点: [23 15] 深灰色
+% 终点: [22 28] 深灰色
+% 路径: 浅灰色
+
+%% 构建地标
+for i = 1 : (length(xEst) - 3) / 2
+    LM(i, 1) = xEst(4 + 2 * (i-1));
+    LM(i, 2) = xEst(5 + 2 * (i-1));
+end
+
+%% 栅格地图
+Grid = ones(30, 30);
+for i = 1 : length(LM)
+    Grid(floor(30 - LM(i, 2)), floor(LM(i, 1)) + 10) = 0;
+    Grid(floor(30 - LM(i, 2) + 1), floor(LM(i, 1)) + 10) = 0;
+    Grid(floor(30 - LM(i, 2)), floor(LM(i, 1)) + 10 + 1) = 0;
+    Grid(floor(30 - LM(i, 2) + 1), floor(LM(i, 1)) + 10 + 1) = 0;
+end
+Grid(31, 1:8) = 1;
+Grid(1:8, 31) = 1;
+Grid(23, 15) = 0.3;
+Grid(22, 28) = 0.3;
+
+%% A*算法计算路线
+
+% 初始化
+state = [];
+for i = 1 : 30
+    t_row = [];
+    for j = 1 : 30
+        t.in_openlist = false;
+        t.in_closelist = false;
+        t.is_origin = false;
+        t.is_end = false;
+        t.is_wall = false;
+        t.F = 9999;
+        t.G = 9999;
+        t.H = 9999;
+        t.parent_node = [];
+        t_row = [t_row, t];
+    end
+    state = [state; t_row];
+end
+state(23, 15).is_origin = true; % start
+state(22, 28).is_end = true; % end
+for i = 1:30
+    for j = 1:30
+        if Grid(i, j) == 0
+            state(i, j).is_wall = true; % wall
+        end
+    end
+end
+closelist = [];
+openlist = [];
+x = 23; y = 15; % state(x,y); x为行数，y为列数
+
+% 第一步
+closelist = [closelist; [x y]];
+state(x, y).in_closelist = true;
+state(x, y).G = 0;
+state(x, y).H = 10 * (abs(x-22) + abs(y-28)); % 曼哈顿距离
+state(x, y).F = state(x, y).G + state(x, y).H;
+for i = -1:1
+    for j = -1:1
+        if state(x+i, y+j).in_closelist == false && state(x+i, y+j).in_openlist == false && state(x+i, y+j).is_wall == false
+            openlist = [openlist; [x+i, y+j]];
+            state(x+i, y+j).parent_node = [x, y];
+            state(x+i, y+j).in_openlist = true;
+            state(x+i, y+j).H = 10 * (abs(x+i-22) + abs(y+j-28));
+            state(x+i, y+j).G = state(x, y).G + floor(10 * sqrt(i*i + j*j));
+            state(x+i, y+j).F = state(x+i, y+j).G + state(x+i, y+j).H;
+        end
+    end
+end
+
+% 之后每一步
+[num, ~] = size(openlist);
+tmpF = [];
+for i = 1:num % 寻找openlist中F值最小的点对应的坐标
+    tmpF = [tmpF, state(openlist(i,1), openlist(i,2)).F];
+end
+[~, idx] = min(tmpF);
+x = openlist(idx, 1);
+y = openlist(idx, 2);
+
+while(state(x, y).is_end == false)
+    
+    state(x, y).in_openlist = false;
+    state(x, y).in_closelist = true;
+    openlist(idx, :) = [];
+    closelist = [closelist; [x,y]];
+    
+    for i = -1:1
+        for j = -1:1
+            if state(x+i, y+j).in_closelist == false && state(x+i, y+j).in_openlist == false && state(x+i, y+j).is_wall == false
+                openlist = [openlist; [x+i, y+j]];
+                state(x+i, y+j).parent_node = [x, y];
+                state(x+i, y+j).in_openlist = true;
+                state(x+i, y+j).H = 10 * (abs(x+i-22) + abs(y+j-28));
+                state(x+i, y+j).G = state(x, y).G + floor(10 * sqrt(i*i + j*j));
+                state(x+i, y+j).F = state(x+i, y+j).G + state(x+i, y+j).H;
+            elseif state(x+i, y+j).in_openlist == true && state(x+i, y+j).G > state(x, y).G + floor(10 * sqrt(i*i + j*j))
+                state(x+i, y+j).G = state(x, y).G + floor(10 * sqrt(i*i + j*j));
+                state(x+i, y+j).F = state(x+i, y+j).G + state(x+i, y+j).H;
+                state(x+i, y+j).parent_node = [x, y];
+            end
+        end
+    end
+    
+    [num, ~] = size(openlist);
+    tmpF = [];
+    for i = 1:num % 寻找openlist中F值最小的点对应的坐标
+        tmpF = [tmpF, state(openlist(i,1), openlist(i,2)).F];
+    end
+    [~, idx] = min(tmpF);
+    x = openlist(idx, 1);
+    y = openlist(idx, 2);
+    
+end
+
+% draw the line
+x = state(x, y).parent_node(1);
+y = state(x, y).parent_node(2);
+while(state(x, y).parent_node(1) ~= 23 || state(x, y).parent_node(2) ~= 15)
+    Grid(x, y) = 0.7;
+    i = state(x, y).parent_node(1);
+    j = state(x, y).parent_node(2);
+    x = i;
+    y = j;
+end
+Grid(x, y) = 0.7;
+
+figure,imshow(Grid);
+
+end
